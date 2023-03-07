@@ -245,15 +245,42 @@ MaybeLocal<Value> Realm::BootstrapNode() {
     return MaybeLocal<Value>();
   }
 
-  Local<String> env_string = FIXED_ONE_BYTE_STRING(isolate_, "env");
   Local<Object> env_proxy;
   CreateEnvProxyTemplate(isolate_, env_->isolate_data());
-  if (!env_->env_proxy_template()->NewInstance(context()).ToLocal(&env_proxy) ||
-      process_object()->Set(context(), env_string, env_proxy).IsNothing()) {
+  if (!env_->env_proxy_template()->NewInstance(context()).ToLocal(&env_proxy)) {
+    return MaybeLocal<Value>();
+  }
+
+  if (!process_object()->SetAccessor(
+    context(),
+    FIXED_ONE_BYTE_STRING(isolate_, "env"),
+    EnvPropertyGetter,
+    EnvPropertySetter,
+    env_proxy
+  ).FromJust()) {
     return MaybeLocal<Value>();
   }
 
   return scope.EscapeMaybe(result);
+}
+
+static void EnvPropertyGetter(Local<Name> property,
+                               const PropertyCallbackInfo<Value>& info) {
+  info.GetReturnValue().Set(info.Data());
+}
+
+static void EnvPropertySetter(Local<Name> property,
+                               Local<Value> value,
+                               const PropertyCallbackInfo<void>& info) {
+  Environment* env = Environment::GetCurrent(info);
+  if (value->IsObject()) {
+    Local<Object> value_object;
+    if (!value->ToObject(env->context()).ToLocal(&value_object)) return;
+    env->env_vars()->AssignFromObject(
+      env->isolate(), value_object
+    );
+  }
+  info.GetReturnValue().Set(value);
 }
 
 MaybeLocal<Value> Realm::RunBootstrapping() {
@@ -360,3 +387,11 @@ void Realm::VerifyNoStrongBaseObjects() {
 }
 
 }  // namespace node
+
+void RegisterRealmExternalReferences(ExternalReferenceRegistry* registry) {
+  registry->Register(EnvGetter);
+  registry->Register(EnvSetter);
+}
+
+NODE_BINDING_EXTERNAL_REFERENCE(process_object,
+                                node::RegisterRealmExternalReferences)
